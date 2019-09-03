@@ -20,12 +20,12 @@ strings\
 let s4 = "Text \" with /*$note escape characters*/"; /*$note gone*/
 let s5 = 'Text \' with /*$note escape characters*/'; /*$note gone*/
 let s6 = /*$note surrounded*/"/*$note text*/"/*$note surrounded*/;
-// this line comment is preserved
-let a = 0; // this line comment is also preserved
-/* this block comment is preserved */
-let b = 0; /* this block comment is also preserved */
+// /*$note this line comment is preserved*/
+let a = 0; // /*$note this line comment is also preserved*/
+/* /*$note this block comment is preserved */
+let b = 0; /* /*$note this block comment is also preserved */
 /* this
 block
-comment
+/*$note comment
 is
 preserved */

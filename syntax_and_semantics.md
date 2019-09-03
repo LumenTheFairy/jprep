@@ -28,7 +28,7 @@ Comments take the form
 ```
 /*$note Comment*/
 ```
-("Note" is required, and all following text can be anything). Casing is not important for "note". These directives do nothing, but they are stripped out. Use these to write comments that you don't want to appear in the preprocessed code, for example, comments that document the use of other directives.
+("Note" is required, and all following text can be anything). Casing is not important for "note". These directives do nothing, but they are stripped out. Use these to write comments that you don't want to appear in the preprocessed code, for example, comments that document the use of other directives. If the note is the only thing on a line besides whitespace, the full line is stripped out.
 
 
 Scoping:

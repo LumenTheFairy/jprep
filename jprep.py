@@ -179,11 +179,15 @@ def preprocess(in_file, out_file):
     read_line()
     while in_line:
         # TODO: handle template strings
-        m = re.search(r'"|\'|/\*\$', in_line[in_end:])
+        m = re.search(r'/\*\$|"|\'|//|/\*', in_line[in_end:])
         if m:
             advance(m.start(0))
             if m[0] in ["'", '"']:
                 parse_string(in_line[in_end])
+            elif m[0] == '//':
+                parse_line_comment()
+            elif m[0] == '/*':
+                parse_block_comment()
             elif m[0] == '/*$':
                 parse_directive()
         else:
