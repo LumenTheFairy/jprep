@@ -83,14 +83,16 @@ def should_preprocess(in_path, out_path, full_build):
 A file should be preprocessed for any of the following reasons:
 - We are doing a full build
 - The file has never been preprocessed before
-- The file has been modified since the last time it was preprocessed"""
+- The file has been modified since the last time it was preprocessed
+- This script has been modified since the last time it ran"""
 
-#TODO: if this script is more recent than an output file, it should be re-processed
     if full_build:
         return True
     if not os.path.exists(out_path):
         return True
     if os.path.getmtime(in_path) > os.path.getmtime(out_path):
+        return True
+    if os.path.getmtime(__file__) > os.path.getmtime(out_path):
         return True
     return False
 
