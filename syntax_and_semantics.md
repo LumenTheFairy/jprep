@@ -33,7 +33,7 @@ Comments take the form
 
 Scoping:
 
-In jprep, definitions are lexically scoped with respect to the JavaScript/TypeScript code. That is, a definition is only valid for the file, function, or block it is defined in (and any nested scopes therein).
+In jprep, definitions are basically lexically scoped with respect to the JavaScript/TypeScript code. That is, a definition is only valid for the file, function, block, or object literal it is defined in (and any nested scopes therein). I say "basically" lexically scoped because object literals increasing scope depth is not typical. Another way to think of it is: any '{' outside strings, comments, and directives increases the scope depth, and likewise any '}' decreases it.
 
 
 Configuration:

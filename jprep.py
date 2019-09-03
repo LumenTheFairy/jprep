@@ -9,6 +9,7 @@ Written by TheOnlyOne (@modest_ralts, https://github.com/LumenTheFairy).
 import argparse
 from sys import stderr
 import os
+import re
 
 # Setup logging
 import logging
@@ -18,7 +19,7 @@ handler = logging.StreamHandler()
 handler.setFormatter(formatter)
 log.addHandler(handler)
 log.setLevel(logging.INFO)
-LOG_VERBOSE_LEVEL_NUM = 5
+LOG_VERBOSE_LEVEL_NUM = 15
 logging.addLevelName(LOG_VERBOSE_LEVEL_NUM, "VERBOSE")
 def log_verbose(self, message, *args, **kws):
     if self.isEnabledFor(LOG_VERBOSE_LEVEL_NUM):
@@ -83,6 +84,8 @@ A file should be preprocessed for any of the following reasons:
 - We are doing a full build
 - The file has never been preprocessed before
 - The file has been modified since the last time it was preprocessed"""
+
+#TODO: if this script is more recent than an output file, it should be re-processed
     if full_build:
         return True
     if not os.path.exists(out_path):
@@ -92,10 +95,98 @@ A file should be preprocessed for any of the following reasons:
     return False
 
 def preprocess(in_file, out_file):
-    for line in in_file:
-        # TODO: preprocess file
-        out_file.write(line)
-    return False
+
+    in_line = ''
+    in_start = 0
+    in_end = 0
+    out_line = ''
+
+    def write_output():
+        nonlocal in_line, in_start, in_end, out_line
+        if in_start == 0:
+            out_file.write(in_line)
+        else:
+            output = out_line + in_line[in_start:]
+            if not output.isspace():
+                out_file.write(out_line + in_line[in_start:])
+
+    def read_line():
+        nonlocal in_line, in_start, in_end, out_line
+        in_line = in_file.readline()
+        in_start = 0
+        in_end = 0
+        out_line = ''
+
+    def append_output():
+        nonlocal in_line, in_start, in_end, out_line
+        out_line += in_line[in_start:in_end]
+        in_start = in_end
+
+    def move_to_next_line_if_necessary():
+        nonlocal in_line, in_start, in_end, out_line
+        if in_end >= len(in_line):
+            raise Exception('Internal error')
+        if in_line[in_end:] == '\n':
+            write_output()
+            read_line()
+
+    def advance(count=1):
+        nonlocal in_line, in_start, in_end, out_line
+        in_end += count
+        move_to_next_line_if_necessary()
+
+    def advance_line():
+        nonlocal in_line, in_start, in_end, out_line
+        in_end = len(in_line) - 1
+        move_to_next_line_if_necessary()
+
+    def skip(count=1):
+        nonlocal in_line, in_start, in_end, out_line
+        append_output()
+        in_start = in_end + count
+        in_end = in_start
+        move_to_next_line_if_necessary()
+
+    def advance_until(regex):
+        m = None
+        while not m and in_line:
+            m = re.search(regex, in_line[in_end:])
+            if m:
+                advance(m.end(0))
+            else:
+                advance_line()
+
+    def parse_string(quote):
+        nonlocal in_line, in_start, in_end, out_line
+        advance()
+        advance_until(r'(?<!\\)' + quote)
+
+    def parse_line_comment():
+        nonlocal in_line, in_start, in_end, out_line
+        advance_line()
+
+    def parse_block_comment():
+        nonlocal in_line, in_start, in_end, out_line
+        advance_until(r'\*/')
+
+    def parse_directive():
+        nonlocal in_line, in_start, in_end, out_line
+        col = in_start+3
+        end = in_line[in_end:].find('*/')
+        skip(end + 2)
+
+    read_line()
+    while in_line:
+        m = re.search(r'"|\'|/\*\$', in_line[in_end:])
+        if m:
+            advance(m.start(0))
+            if m[0] in ["'", '"']:
+                parse_string(in_line[in_end])
+            elif m[0] == '/*$':
+                parse_directive()
+        else:
+            advance_line()
+    return True
 
 if __name__ == '__main__':
     # Parse the arguments
@@ -116,3 +207,5 @@ if __name__ == '__main__':
         out_path = os.path.join(args.out_dir, filename)
         if should_preprocess(in_path, out_path, args.build):
             atomic_streamed_file_process(in_path, out_path, preprocess)
+        else:
+            log.verbose(f'Skipping "{filename}"; it is already up-to-date.')
