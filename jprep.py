@@ -171,12 +171,14 @@ def preprocess(in_file, out_file):
 
     def parse_directive():
         nonlocal in_line, in_start, in_end, out_line
+        # TODO: actually handle directives instead of just skipping them
         col = in_start+3
         end = in_line[in_end:].find('*/')
         skip(end + 2)
 
     read_line()
     while in_line:
+        # TODO: handle template strings
         m = re.search(r'"|\'|/\*\$', in_line[in_end:])
         if m:
             advance(m.start(0))
