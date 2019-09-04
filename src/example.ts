@@ -4,6 +4,16 @@ let y = 0; /*$note this gets deleted /* /* /* still */
     /*$note this gets deleted, removing the full line, even though there is indentation*/
 /*$note however, the following blank line is preserved*/
 
+/*$note this
+is
+a
+multi
+line
+directive*/
+/*$   note whitespace before the directive */
+/*$
+note the directive can be on a different line
+*/
 /*$note the following lines have nothing special and should quickly be written out*/
 let z = [
   0,
