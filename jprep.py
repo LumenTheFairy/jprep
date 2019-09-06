@@ -126,129 +126,112 @@ def preprocess(in_file, out_file):
 
     env = DefinitionEnvironment()
 
-    # TODO: clean up this nonlocal mess
-    in_line = ''
-    line_num = 0
-    in_start = 0
-    in_end = 0
-    out_line = ''
-
-    def report_error(message):
-        raise PreprocessException(f'(Line {line_num}) {message}')
-
-    def write_output():
-        nonlocal in_line, line_num, in_start, in_end, out_line
-        if in_start == 0:
-            out_file.write(in_line)
-        else:
-            output = out_line + in_line[in_start:]
-            if not output.isspace():
-                out_file.write(out_line + in_line[in_start:])
-
-    def read_line():
-        nonlocal in_line, line_num, in_start, in_end, out_line
-        in_line = in_file.readline()
-        line_num += 1
+    class LocalVariables():
+        in_line = ''
+        line_num = 0
         in_start = 0
         in_end = 0
         out_line = ''
+    l = LocalVariables
+
+    def report_error(message):
+        raise PreprocessException(f'(Line {l.line_num}) {message}')
+
+    def write_output():
+        if l.in_start == 0:
+            out_file.write(l.in_line)
+        else:
+            output = l.out_line + l.in_line[l.in_start:]
+            if not output.isspace():
+                out_file.write(l.out_line + l.in_line[l.in_start:])
+
+    def read_line():
+        l.in_line = in_file.readline()
+        l.line_num += 1
+        l.in_start = 0
+        l.in_end = 0
+        l.out_line = ''
 
     def append_output():
-        nonlocal in_line, line_num, in_start, in_end, out_line
-        out_line += in_line[in_start:in_end]
-        in_start = in_end
+        l.out_line += l.in_line[l.in_start:l.in_end]
+        l.in_start = l.in_end
 
     def move_to_next_line_if_necessary():
-        nonlocal in_line, line_num, in_start, in_end, out_line
-        if in_end >= len(in_line):
+        if l.in_end >= len(l.in_line):
             raise Exception('Internal error')
-        if in_line[in_end:] == '\n':
+        if l.in_line[l.in_end:] == '\n':
             write_output()
             read_line()
 
     def advance(count=1):
-        nonlocal in_line, line_num, in_start, in_end, out_line
-        in_end += count
+        l.in_end += count
         move_to_next_line_if_necessary()
 
     def advance_line():
-        nonlocal in_line, line_num, in_start, in_end, out_line
-        in_end = len(in_line) - 1
+        l.in_end = len(l.in_line) - 1
         move_to_next_line_if_necessary()
 
     def skip(count=1):
-        nonlocal in_line, line_num, in_start, in_end, out_line
         append_output()
-        in_start = in_end + count
-        in_end = in_start
+        l.in_start = l.in_end + count
+        l.in_end = l.in_start
         move_to_next_line_if_necessary()
 
     def advance_until(regex):
-        nonlocal in_line, line_num, in_start, in_end, out_line
         m = None
-        while not m and in_line:
-            m = re.search(regex, in_line[in_end:])
+        while not m and l.in_line:
+            m = re.search(regex, l.in_line[l.in_end:])
             if m:
                 advance(m.end(0))
             else:
                 advance_line()
 
     def skip_until(regex):
-        nonlocal in_line, line_num, in_start, in_end, out_line
         m = None
-        while not m and in_line:
-            m = re.search(regex, in_line[in_end:])
+        while not m and l.in_line:
+            m = re.search(regex, l.in_line[l.in_end:])
             if m:
                 skip(m.end(0))
             else:
-                in_start = len(in_line) - 1
+                l.in_start = len(l.in_line) - 1
                 advance_line()
 
     def try_skip_string(s):
-        nonlocal in_line, line_num, in_start, in_end, out_line
-        if in_line[in_end:].startswith(s):
+        if l.in_line[l.in_end:].startswith(s):
             skip(len(s))
             return True
         return False
 
     def skip_whitespace():
-        nonlocal in_line, line_num, in_start, in_end, out_line
         skip_until(r'(?!\s)')
 
     def try_read_identifier():
-        nonlocal in_line, line_num, in_start, in_end, out_line
-        m = re.search(ID_CH + '+' + r'(?!' + ID_CH + ')', in_line[in_end:])
+        m = re.search(ID_CH + '+' + r'(?!' + ID_CH + ')', l.in_line[l.in_end:])
         if not m:
             return None
         skip(m.end(0))
         return m[0]
 
     def read_identifier(error_message):
-        nonlocal in_line, line_num, in_start, in_end, out_line
         result = try_read_identifier()
         if not result:
             report_error(error_message)
         return result
 
     def parse_string(quote):
-        nonlocal in_line, line_num, in_start, in_end, out_line
         advance()
         advance_until(r'(?<!\\)' + quote)
 
     def parse_line_comment():
-        nonlocal in_line, line_num, in_start, in_end, out_line
         advance_line()
 
     def parse_block_comment():
-        nonlocal in_line, line_num, in_start, in_end, out_line
         advance_until(r'\*/')
 
     def parse_note():
-        nonlocal in_line, line_num, in_start, in_end, out_line
         skip_until(r'\*/')
 
     def parse_define():
-        nonlocal in_line, line_num, in_start, in_end, out_line
         name = read_identifier('Expected a name at the begining of the "define" directive.')
         skip_whitespace()
         value = None
@@ -278,7 +261,6 @@ def preprocess(in_file, out_file):
 
 
     def parse_directive():
-        nonlocal in_line, line_num, in_start, in_end, out_line
         skip(3)
         skip_whitespace()
         directive = read_identifier('Directives must start with an identifier.')
@@ -290,17 +272,17 @@ def preprocess(in_file, out_file):
             parse_define()
         # TODO: if
         else:
-            end = in_line[in_end:].find('*/')
+            end = l.in_line[l.in_end:].find('*/')
             skip(end + 2)
 
     read_line()
-    while in_line:
+    while l.in_line:
         # TODO: template literals
-        m = re.search(r'/\*\$|"|\'|//|/\*|\{|\}', in_line[in_end:])
+        m = re.search(r'/\*\$|"|\'|//|/\*|\{|\}', l.in_line[l.in_end:])
         if m:
             advance(m.start(0))
             if m[0] in ["'", '"']:
-                parse_string(in_line[in_end])
+                parse_string(l.in_line[l.in_end])
             elif m[0] == '//':
                 parse_line_comment()
             elif m[0] == '/*':
