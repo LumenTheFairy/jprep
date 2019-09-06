@@ -112,12 +112,17 @@ class DefinitionEnvironment:
 
     def __init__(self):
         self.scopes = []
-        self.push_scope
+        self.push_scope()
 
-    #TODO: write accessor functions
+    def lookup(self, name):
+        for scope in reversed(self.scopes):
+            if name in scope:
+                return scope[name]
+        return None
 
-    def define(name, value=None, choices=None):
+    def define(self, name, value=None, choices=None):
         self.scopes[-1][name] = DefinitionEntry(value, choices)
+    #TODO: casing IS important for these identifiers; updated the docs to reflect this
 
 class PreprocessException(Exception):
     pass
@@ -126,6 +131,8 @@ def preprocess(in_file, out_file):
 
     env = DefinitionEnvironment()
 
+    # This is a bit of an ugly trick to avoid putting 'nonlocal' in any nested functions
+    # that only write to these (which I find easy to forget, and hard to track down; not a good combination)
     class LocalVariables():
         in_line = ''
         line_num = 0
@@ -135,7 +142,8 @@ def preprocess(in_file, out_file):
     l = LocalVariables
 
     def report_error(message):
-        raise PreprocessException(f'(Line {l.line_num}) {message}')
+        #TODO: this can be off by one if the line is consumed by the time the error is raised
+        raise PreprocessException(f'{message}\nLine {l.line_num}: {l.in_line}')
 
     def write_output():
         if l.in_start == 0:
@@ -256,8 +264,24 @@ def preprocess(in_file, out_file):
         skip_whitespace()
         if not try_skip_string('*/'):
             report_error('Only whitespace allowed at the end of a "define" directive.')
-        # TODO: if there is a value and choice, make sure the value is one of the choices
-        # TODO: add define to the environment
+
+
+        old_definition = env.lookup(name)
+        if old_definition:
+            if old_definition.choices:
+                if choices:
+                    # TODO: say where they were set?
+                    report_error(f'"{name}" already has a set of choices.')
+                else:
+                    choices = old_definition.choices
+
+        if choices:
+            if not value:
+                report_error(f'A value must be given for a definition with choices.')
+            if value not in choices:
+                choices_format = ", ".join(map(lambda c: f'"{c}"', choices))
+                report_error(f'"{value}" is not one of the required choices for "{name}": [{choices_format}]')
+        env.define(name, value, choices)
 
 
     def parse_directive():
@@ -266,6 +290,7 @@ def preprocess(in_file, out_file):
         directive = read_identifier('Directives must start with an identifier.')
         skip_whitespace()
 
+        # TODO: casing should not be important
         if directive == 'note':
             parse_note()
         elif directive == 'define':
@@ -289,8 +314,10 @@ def preprocess(in_file, out_file):
                 parse_block_comment()
             elif m[0] == '{':
                 env.push_scope()
+                advance()
             elif m[0] == '}':
                 env.pop_scope()
+                advance()
             elif m[0] == '/*$':
                 parse_directive()
         else:

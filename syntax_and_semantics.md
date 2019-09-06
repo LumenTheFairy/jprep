@@ -15,7 +15,9 @@ The Definition directives are
 /*$undefine NAME */
 ```
 
-`NAME`, `VALUE`, and any `CHOICE` must be valid identifiers. Casing is not important for these identifiers, or for "define" or "undefine". Defining a name places that name in a definition environment, optionally mapping it to a value. If the name is already in the definition environment, redefining it without a value will remove any value it has (but leave it defined), and redefining it with a value will change its value. If choices are present, as long as the name is defined, it's value can only be set to one of the choices, and it can only be compared to these choices in conditions. Giving explicit choices for a name can help catch typos in conditions. Undefining a name will remove it from the definition environment. A name can only be undefined at the same scoping level as where it was defined. When a definition goes out of scope, it is automatically undefined (see scoping rules below).
+`NAME`, `VALUE`, and any `CHOICE` must be valid identifiers. Casing is not important for these identifiers, or for "define" or "undefine". Defining a name places that name in a definition environment, optionally mapping it to a value. If the name is already in the definition environment, redefining it without a value will remove any value it has (but leave it defined), and redefining it with a value will change its value. If choices are present, as long as the name is defined, it's value can only be set to one of the choices, and it can only be compared to these choices in conditions. It is an error to give choices to a name that already has them. Giving explicit choices for a name can help catch typos in conditions. Undefining a name will remove it from the definition environment. A name can only be undefined at the same scoping level as where it was defined. When a definition goes out of scope, it is automatically undefined (see scoping rules below).
+
+#TODO: case sensitivity needs to be changed
 
 Conditions take the form
 ```
@@ -34,6 +36,8 @@ Comments take the form
 Scoping:
 
 In jprep, definitions are basically lexically scoped with respect to the JavaScript/TypeScript code. That is, a definition is only valid for the file, function, block, or object literal it is defined in (and any nested scopes therein). I say "basically" lexically scoped because object literals increasing scope depth is not typical. Another way to think of it is: any '{' outside strings, comments, and directives increases the scope depth, and likewise any '}' decreases it.
+
+#TODO: be more clear on definition scope shadowing behavior
 
 
 Configuration:
