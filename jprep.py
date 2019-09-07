@@ -106,8 +106,21 @@ class DefinitionEntry:
         self.value = value
         self.choices = choices
 
-class DefinitionEnvironment:
-    """Holds all definitions in a stack of scopes"""
+class IfState(Enum):
+    If = auto()
+    ElseIf = auto()
+    Else = auto()
+
+class IfEntry:
+    """Holds info about the current if directives"""
+    def __init__(self):
+        self.state = IfState.If
+        self.seen_true = False
+        self.in_true = False
+
+class ParsingEnvironment:
+    """Holds all definitions in a stack of scopes, and keeps track of nested if directives"""
+
     def push_scope(self):
         """Enter a new scope"""
         self.scopes.append({})
@@ -116,6 +129,10 @@ class DefinitionEnvironment:
         """Leave the current scope"""
         self.scopes.pop()
 
+    def define(self, name, value=None, choices=None):
+        """Adds or overwrites the definition of name in the current scope"""
+        self.scopes[-1][name] = DefinitionEntry(value, choices)
+
     def lookup(self, name):
         """Gets the entry for the most deeply nested definition of name, if there are any"""
         for scope in reversed(self.scopes):
@@ -123,12 +140,40 @@ class DefinitionEnvironment:
                 return scope[name]
         return None
 
-    def define(self, name, value=None, choices=None):
-        """Adds or overwrites the definition of name in the current scope"""
-        self.scopes[-1][name] = DefinitionEntry(value, choices)
+    def push_if(self):
+        """Enter a new if directive"""
+        self.if_stack.append(IfEntry())
+
+    def pop_if(self):
+        """Leave the current if directive"""
+        self.if_stack.pop()
+
+    def in_if(self):
+        return bool(self.if_stack)
+
+    def set_if_branch(self, flag):
+        """Set the current if directive's truthfulness"""
+        self.if_stack[-1].in_true = flag
+        self.if_stack[-1].seen_true |= flag
+
+    def set_if_state(self, state):
+        self.if_stack[-1].state = state
+
+    def get_if_state(self):
+        return self.if_stack[-1].state
+
+    def get_seen_true(self):
+        return self.if_stack[-1].seen_true
+
+    def get_in_true(self):
+        for entry in self.if_stack:
+            if not entry.in_true:
+                return False
+        return True
 
     def __init__(self):
         self.scopes = []
+        self.if_stack = []
         self.push_scope()
     #TODO: casing IS important for these identifiers; update the docs to reflect this
 
@@ -153,7 +198,7 @@ end_comment_re = re.compile(r'\*/')
 
 def preprocess(in_file, out_file):
 
-    env = DefinitionEnvironment()
+    env = ParsingEnvironment()
 
     class ParseMode(Enum):
         Output = auto()
@@ -195,11 +240,14 @@ def preprocess(in_file, out_file):
         prev_line_num = 0
     l = LocalVariables
 
-    def report_error(message):
-        if l.scan == 0:
-            raise PreprocessException(message, l.prev_line, l.prev_line_num)
-        else:
-            raise PreprocessException(message, l.in_line, l.line_num)
+    mode_stack = []
+
+    def push_mode(mode):
+        mode_stack.append(l.parse_mode)
+        l.parse_mode = mode
+
+    def pop_mode():
+        l.parse_mode = mode_stack.pop()
 
     #----------------------------------------------------------------------------------------------
     # Handle input and output and line transitions
@@ -254,6 +302,18 @@ def preprocess(in_file, out_file):
                 parse_any(m.end(0))
             else:
                 parse_line()
+
+    #----------------------------------------------------------------------------------------------
+    # Error reporting
+    def report_error(message):
+        if l.scan == 0:
+            raise PreprocessException(message, l.prev_line, l.prev_line_num)
+        else:
+            raise PreprocessException(message, l.in_line, l.line_num)
+
+    def report_choice_inclusion_error(name, value, choices):
+        choices_format = ", ".join(map(lambda c: f'"{c}"', choices))
+        report_error(f'"{value}" is not one of the required choices for "{name}": [{choices_format}]')
 
     #----------------------------------------------------------------------------------------------
     # Parsing atoms
@@ -336,16 +396,99 @@ def preprocess(in_file, out_file):
 
         if choices:
             if not value:
-                report_error(f'A value must be given for a definition with choices.')
+                report_error('A value must be given for a definition with choices.')
             if value not in choices:
-                choices_format = ", ".join(map(lambda c: f'"{c}"', choices))
-                report_error(f'"{value}" is not one of the required choices for "{name}": [{choices_format}]')
+                report_choice_inclusion_error(name, value, choices)
         env.define(name, value, choices)
 
+    def parse_condition(directive):
+        name = parse_identifier(f'Expected a name at the begining of the "{directive}" directive.')
+        parse_whitespace()
+        value = None
+        if try_parse_chars('='):
+            parse_whitespace()
+            value = parse_identifier(f'Expected a value after "=" in the "{directive}" directive.')
+            parse_whitespace()
+        if not try_parse_chars('*/'):
+            report_error(f'Only whitespace allowed at the end of a "{directive}" directive.')
+        return [name, value]
+
+    def get_branch_parse_mode():
+        if env.get_in_true():
+            return ParseMode.Output
+        else:
+            return ParseMode.Skip
+
+    def parse_if():
+        [name, value] = parse_condition('if')
+
+        definition = env.lookup(name)
+        env.push_if()
+        if not definition:
+            env.set_if_branch(False)
+        else:
+            if definition.choices and not value in definition.choices: # False even if value is None
+                report_choice_inclusion_error(name, value, definition.choices)
+            if definition.value == value:
+                env.set_if_branch(True)
+            else:
+                env.set_if_branch(False)
+
+        return get_branch_parse_mode()
+
+    def parse_elseif():
+        if not env.in_if():
+            report_error('"elseif" directive outside of "if".')
+        if env.get_if_state() == IfState.Else:
+            report_error('"elseif" directive after "else".')
+
+        [name, value] = parse_condition('elseif')
+        pop_mode()
+
+        definition = env.lookup(name)
+        env.set_if_state(IfState.ElseIf)
+        if not definition:
+            env.set_if_branch(False)
+        else:
+            if definition.choices and not value in definition.choices: # False even if value is None
+                report_choice_inclusion_error(name, value, definition.choices)
+            if env.get_seen_true():
+                env.set_if_branch(False)
+            elif definition.value == value:
+                env.set_if_branch(True)
+            else:
+                env.set_if_branch(False)
+
+        return get_branch_parse_mode()
+
+    def parse_else():
+        if not env.in_if():
+            report_error('"else" directive outside of "if".')
+        if env.get_if_state() == IfState.Else:
+            report_error('"else" directive after "else".')
+
+        parse_whitespace()
+        if not try_parse_chars('*/'):
+            report_error('Only whitespace allowed at the end of a "else" directive.')
+        pop_mode()
+
+        env.set_if_state(IfState.Else)
+        env.set_if_branch(not env.get_seen_true())
+
+        return get_branch_parse_mode()
+
+    def parse_fi():
+        parse_whitespace()
+        if not try_parse_chars('*/'):
+            report_error('Only whitespace allowed at the end of a "fi" directive.')
+        pop_mode()
+
+        env.pop_if()
 
     def parse_directive():
-        old_mode = l.parse_mode
-        l.parse_mode = ParseMode.Skip
+        result = False
+        new_mode = None
+        push_mode(ParseMode.Skip)
         parse_any(3)
         parse_whitespace()
         directive = parse_identifier('Directives must start with an identifier.')
@@ -356,35 +499,49 @@ def preprocess(in_file, out_file):
             parse_note()
         elif directive == 'define':
             parse_define()
-        # TODO: if
+        elif directive == 'if':
+            new_mode = parse_if()
+        elif directive == 'elseif':
+            new_mode = parse_elseif()
+        elif directive == 'else':
+            new_mode = parse_else()
+        elif directive == 'fi':
+            parse_fi()
         else:
             end = l.in_line[l.scan:].find('*/')
             parse_any(end + 2)
 
-        l.parse_mode = old_mode
+        pop_mode()
+        if new_mode:
+            push_mode(new_mode)
+        return result
+
+    def parse_next():
+        while l.in_line:
+            # TODO: template literals
+            # TODO: precompile this
+            m = re.search(r'/\*\$|"|\'|//|/\*|\{|\}', l.in_line[l.scan:])
+            if m:
+                parse_any(m.start(0))
+                if m[0] in ["'", '"']:
+                    parse_string(l.in_line[l.scan])
+                elif m[0] == '//':
+                    parse_line_comment()
+                elif m[0] == '/*':
+                    parse_block_comment()
+                elif m[0] == '{':
+                    env.push_scope()
+                    parse_any(1)
+                elif m[0] == '}':
+                    env.pop_scope()
+                    parse_any(1)
+                elif m[0] == '/*$':
+                    parse_directive()
+            else:
+                parse_line()
 
     read_line()
-    while l.in_line:
-        # TODO: template literals
-        m = re.search(r'/\*\$|"|\'|//|/\*|\{|\}', l.in_line[l.scan:])
-        if m:
-            parse_any(m.start(0))
-            if m[0] in ["'", '"']:
-                parse_string(l.in_line[l.scan])
-            elif m[0] == '//':
-                parse_line_comment()
-            elif m[0] == '/*':
-                parse_block_comment()
-            elif m[0] == '{':
-                env.push_scope()
-                parse_any(1)
-            elif m[0] == '}':
-                env.pop_scope()
-                parse_any(1)
-            elif m[0] == '/*$':
-                parse_directive()
-        else:
-            parse_line()
+    parse_next()
     return True
 
 if __name__ == '__main__':
