@@ -6,10 +6,18 @@ A very basic JavaScript/TypeScript preprocessor.
 Written by TheOnlyOne (@modest_ralts, https://github.com/LumenTheFairy).
 """
 
+# Constants
+DEFAULT_IN_DIR = "./"
+DEFAULT_OUT_DIR = "./preprocessed/"
+
+ID_CH = r'[\w$]'
+
+
 import argparse
 from sys import stderr
 import os
 import re
+from enum import Enum, auto
 
 # Setup logging
 import logging
@@ -25,11 +33,6 @@ def log_verbose(self, message, *args, **kws):
     if self.isEnabledFor(LOG_VERBOSE_LEVEL_NUM):
         self._log(LOG_VERBOSE_LEVEL_NUM, message, args, **kws)
 logging.Logger.verbose = log_verbose
-
-DEFAULT_IN_DIR = "./"
-DEFAULT_OUT_DIR = "./preprocessed/"
-
-ID_CH = r'[\w$]'
 
 def parseArguments():
     # Create argument parser
@@ -87,7 +90,6 @@ A file should be preprocessed for any of the following reasons:
 - The file has never been preprocessed before
 - The file has been modified since the last time it was preprocessed
 - This script has been modified since the last time it ran"""
-
     if full_build:
         return True
     if not os.path.exists(out_path):
@@ -99,170 +101,227 @@ A file should be preprocessed for any of the following reasons:
     return False
 
 class DefinitionEntry:
+    """Holds the value and possible choices for a defined name"""
     def __init__(self, value, choices):
         self.value = value
         self.choices = choices
 
 class DefinitionEnvironment:
+    """Holds all definitions in a stack of scopes"""
     def push_scope(self):
+        """Enter a new scope"""
         self.scopes.append({})
 
     def pop_scope(self):
+        """Leave the current scope"""
         self.scopes.pop()
 
-    def __init__(self):
-        self.scopes = []
-        self.push_scope()
-
     def lookup(self, name):
+        """Gets the entry for the most deeply nested definition of name, if there are any"""
         for scope in reversed(self.scopes):
             if name in scope:
                 return scope[name]
         return None
 
     def define(self, name, value=None, choices=None):
+        """Adds or overwrites the definition of name in the current scope"""
         self.scopes[-1][name] = DefinitionEntry(value, choices)
-    #TODO: casing IS important for these identifiers; updated the docs to reflect this
+
+    def __init__(self):
+        self.scopes = []
+        self.push_scope()
+    #TODO: casing IS important for these identifiers; update the docs to reflect this
 
 class PreprocessException(Exception):
-    pass
+    """An exception thrown by preprocess which indicates a parse error that should be reported"""
+    def __init__(self, message, line, line_num):
+        self.message = message
+        self.line = line
+        self.line_num = line_num
+    def __str__(self):
+        return f'{self.message}\nLine {self.line_num}: {self.line}'
+    __repr__ = __str__
+
+
+# precompiled regexes
+whitespace_re = re.compile(r'(?!\s)')
+identifier_re = re.compile(ID_CH + '+' + r'(?!' + ID_CH + ')')
+string_re = {}
+string_re["'"] = re.compile(r"(?<!\\)'")
+string_re['"'] = re.compile(r'(?<!\\)"')
+end_comment_re = re.compile(r'\*/')
 
 def preprocess(in_file, out_file):
 
     env = DefinitionEnvironment()
 
+    class ParseMode(Enum):
+        Output = auto()
+        Skip = auto()
+
+    # black python magic
+    # will make it so the print(l) prints all local variables
+    from itertools import chain
+    class Debug(type):
+      def __str__(self):
+        return '\n'.join(
+            ['preprocess local variables:'] + [
+            f'  {var} = {val!r}'
+            for (var, val)
+             in chain(self.__dict__.items(),
+                {'in_line[scan:]': self.in_line[self.scan:]}.items())
+             if not var.startswith('__')
+            ])
+      __repr__ = __str__
+
     # This is a bit of an ugly trick to avoid putting 'nonlocal' in any nested functions
     # that only write to these (which I find easy to forget, and hard to track down; not a good combination)
-    class LocalVariables():
+    class LocalVariables(metaclass=Debug):
+        # holds the line that was most recently read from in_file
         in_line = ''
+        # current line number in in_file; 1 based
         line_num = 0
-        in_start = 0
-        in_end = 0
+        # all characters in in_line before emit have been written to out_line or have been skipped
+        emit = 0
+        # all characters in in_line before scan have been parsed
+        scan = 0
+        # holds any partial line output. This is only written to if part of the line is skipped;
+        # if emit is 0 at the end of a line, in_line can be written directly to out_file
         out_line = ''
+        # current parse mode
+        parse_mode = ParseMode.Output
+        # for error reporting...
+        prev_line = ''
+        prev_line_num = 0
     l = LocalVariables
 
     def report_error(message):
-        #TODO: this can be off by one if the line is consumed by the time the error is raised
-        raise PreprocessException(f'{message}\nLine {l.line_num}: {l.in_line}')
-
-    def write_output():
-        if l.in_start == 0:
-            out_file.write(l.in_line)
+        if l.scan == 0:
+            raise PreprocessException(message, l.prev_line, l.prev_line_num)
         else:
-            output = l.out_line + l.in_line[l.in_start:]
-            if not output.isspace():
-                out_file.write(l.out_line + l.in_line[l.in_start:])
+            raise PreprocessException(message, l.in_line, l.line_num)
 
+    #----------------------------------------------------------------------------------------------
+    # Handle input and output and line transitions
     def read_line():
+        l.prev_line = l.in_line
+        l.prev_line_num = l.line_num
         l.in_line = in_file.readline()
         l.line_num += 1
-        l.in_start = 0
-        l.in_end = 0
+        l.emit = 0
+        l.scan = 0
         l.out_line = ''
 
+    def write_output():
+        if l.emit == 0:
+            out_file.write(l.in_line)
+        else:
+            output = l.out_line + l.in_line[l.emit:]
+            if not output.isspace():
+                out_file.write(l.out_line + l.in_line[l.emit:])
+
     def append_output():
-        l.out_line += l.in_line[l.in_start:l.in_end]
-        l.in_start = l.in_end
+        l.out_line += l.in_line[l.emit:l.scan]
+        l.emit = l.scan
 
     def move_to_next_line_if_necessary():
-        if l.in_end >= len(l.in_line):
+        if l.scan >= len(l.in_line):
             raise Exception('Internal error')
-        if l.in_line[l.in_end:] == '\n':
+        if l.in_line[l.scan:] == '\n':
             write_output()
             read_line()
 
-    def advance(count=1):
-        l.in_end += count
+    #----------------------------------------------------------------------------------------------
+    # Parsing utility
+    def parse_any(count=1):
+        if l.parse_mode == ParseMode.Skip:
+            append_output()
+            l.emit = l.scan + count
+        l.scan += count
         move_to_next_line_if_necessary()
 
-    def advance_line():
-        l.in_end = len(l.in_line) - 1
+    def parse_line():
+        if l.parse_mode == ParseMode.Skip:
+            l.emit = len(l.in_line) - 1
+        l.scan = len(l.in_line) - 1
         move_to_next_line_if_necessary()
 
-    def skip(count=1):
-        append_output()
-        l.in_start = l.in_end + count
-        l.in_end = l.in_start
-        move_to_next_line_if_necessary()
-
-    def advance_until(regex):
+    def parse_until(regex):
         m = None
         while not m and l.in_line:
-            m = re.search(regex, l.in_line[l.in_end:])
+            m = regex.search(l.in_line[l.scan:])
             if m:
-                advance(m.end(0))
+                parse_any(m.end(0))
             else:
-                advance_line()
+                parse_line()
 
-    def skip_until(regex):
-        m = None
-        while not m and l.in_line:
-            m = re.search(regex, l.in_line[l.in_end:])
-            if m:
-                skip(m.end(0))
-            else:
-                l.in_start = len(l.in_line) - 1
-                advance_line()
-
-    def try_skip_string(s):
-        if l.in_line[l.in_end:].startswith(s):
-            skip(len(s))
+    #----------------------------------------------------------------------------------------------
+    # Parsing atoms
+    def try_parse_chars(s):
+        if l.in_line[l.scan:].startswith(s):
+            parse_any(len(s))
             return True
         return False
 
-    def skip_whitespace():
-        skip_until(r'(?!\s)')
+    def parse_chars(s, error_message):
+        if not try_parse_chars(s):
+            report_error(error_message)
 
-    def try_read_identifier():
-        m = re.search(ID_CH + '+' + r'(?!' + ID_CH + ')', l.in_line[l.in_end:])
+    def try_parse_identifier():
+        m = identifier_re.match(l.in_line[l.scan:])
         if not m:
             return None
-        skip(m.end(0))
+        parse_any(m.end(0))
         return m[0]
 
-    def read_identifier(error_message):
-        result = try_read_identifier()
+    def parse_identifier(error_message):
+        result = try_parse_identifier()
         if not result:
             report_error(error_message)
         return result
 
+    def parse_whitespace():
+        parse_until(whitespace_re)
+
     def parse_string(quote):
-        advance()
-        advance_until(r'(?<!\\)' + quote)
+        parse_any(1)
+        parse_until(string_re[quote])
 
     def parse_line_comment():
-        advance_line()
+        parse_line()
 
     def parse_block_comment():
-        advance_until(r'\*/')
+        parse_until(end_comment_re)
 
+    #----------------------------------------------------------------------------------------------
+    # Parsing directives
     def parse_note():
-        skip_until(r'\*/')
+        parse_until(end_comment_re)
 
     def parse_define():
-        name = read_identifier('Expected a name at the begining of the "define" directive.')
-        skip_whitespace()
+        name = parse_identifier('Expected a name at the begining of the "define" directive.')
+        parse_whitespace()
         value = None
         choices = None
-        if try_skip_string('='):
-            skip_whitespace()
-            value = read_identifier('Expected a value after "=" in the "define" directive.')
-            skip_whitespace()
-        if try_skip_string('<'):
+        if try_parse_chars('='):
+            parse_whitespace()
+            value = parse_identifier('Expected a value after "=" in the "define" directive.')
+            parse_whitespace()
+        if try_parse_chars('<'):
             choices = []
             while True:
-                skip_whitespace()
-                choice = try_read_identifier()
+                parse_whitespace()
+                choice = try_parse_identifier()
                 if choice:
                     choices.append(choice)
                 elif not choices:
                     report_error('There must be at least one choice after "<" in the "define" directive.')
-                skip_whitespace()
-                if not try_skip_string(','):
+                parse_whitespace()
+                if not try_parse_chars(','):
                     break
 
-        skip_whitespace()
-        if not try_skip_string('*/'):
+        parse_whitespace()
+        if not try_parse_chars('*/'):
             report_error('Only whitespace allowed at the end of a "define" directive.')
 
 
@@ -285,10 +344,12 @@ def preprocess(in_file, out_file):
 
 
     def parse_directive():
-        skip(3)
-        skip_whitespace()
-        directive = read_identifier('Directives must start with an identifier.')
-        skip_whitespace()
+        old_mode = l.parse_mode
+        l.parse_mode = ParseMode.Skip
+        parse_any(3)
+        parse_whitespace()
+        directive = parse_identifier('Directives must start with an identifier.')
+        parse_whitespace()
 
         # TODO: casing should not be important
         if directive == 'note':
@@ -297,31 +358,33 @@ def preprocess(in_file, out_file):
             parse_define()
         # TODO: if
         else:
-            end = l.in_line[l.in_end:].find('*/')
-            skip(end + 2)
+            end = l.in_line[l.scan:].find('*/')
+            parse_any(end + 2)
+
+        l.parse_mode = old_mode
 
     read_line()
     while l.in_line:
         # TODO: template literals
-        m = re.search(r'/\*\$|"|\'|//|/\*|\{|\}', l.in_line[l.in_end:])
+        m = re.search(r'/\*\$|"|\'|//|/\*|\{|\}', l.in_line[l.scan:])
         if m:
-            advance(m.start(0))
+            parse_any(m.start(0))
             if m[0] in ["'", '"']:
-                parse_string(l.in_line[l.in_end])
+                parse_string(l.in_line[l.scan])
             elif m[0] == '//':
                 parse_line_comment()
             elif m[0] == '/*':
                 parse_block_comment()
             elif m[0] == '{':
                 env.push_scope()
-                advance()
+                parse_any(1)
             elif m[0] == '}':
                 env.pop_scope()
-                advance()
+                parse_any(1)
             elif m[0] == '/*$':
                 parse_directive()
         else:
-            advance_line()
+            parse_line()
     return True
 
 if __name__ == '__main__':
