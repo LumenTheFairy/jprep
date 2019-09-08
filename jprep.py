@@ -53,6 +53,11 @@ def parseArguments():
         help=f'directory in which to write the output files (defaults to "{DEFAULT_OUT_DIR}")'
         )
     parser.add_argument(
+        "-c", "--configuration",
+        default=None,
+        help=f'configuration file which holds definitions that stay in scope for all preprocessed files'
+        )
+    parser.add_argument(
         "-b", "--build",
         action="store_true",
         help="preprocess all files, even if the output modification is more recent than the source"
@@ -83,12 +88,13 @@ and is expected to return the a boolean indicating its success."""
     else:
         os.remove(out_path + '.temp')
 
-def should_preprocess(in_path, out_path, full_build):
+def should_preprocess(in_path, out_path, config_path, full_build):
     """Determines if a file should be preprocessed.
 A file should be preprocessed for any of the following reasons:
 - We are doing a full build
 - The file has never been preprocessed before
 - The file has been modified since the last time it was preprocessed
+- The config file has been modified since the last run
 - This script has been modified since the last time it ran"""
     if full_build:
         return True
@@ -98,16 +104,20 @@ A file should be preprocessed for any of the following reasons:
         return True
     if os.path.getmtime(__file__) > os.path.getmtime(out_path):
         return True
+    if config_path and (os.path.getmtime(config_path) > os.path.getmtime(out_path)):
+        return True
     return False
 
 class PreprocessException(Exception):
     """An exception thrown by preprocess which indicates a parse error that should be reported"""
-    def __init__(self, message, line, line_num):
+    def __init__(self, message, local_vars):
         self.message = message
-        self.line = line
-        self.line_num = line_num
+        self.l = local_vars
     def __str__(self):
-        return f'{self.message}\nLine {self.line_num}: {self.line}'
+        if self.l.scan == 0:
+            return f'{self.message}\nLine {self.l.prev_line_num}: {self.l.prev_line}'
+        else:
+            return f'{self.message}\nLine {self.l.line_num}: {self.l.line}'
     __repr__ = __str__
 
 class DefinitionEntry:
@@ -136,10 +146,13 @@ class ParsingEnvironment:
         """Enter a new scope"""
         self.scopes.append({})
 
-    def pop_scope(self):
+    def pop_scope(self, ends_branch=False):
         """Leave the current scope"""
-        if (self.in_if() and len(self.scopes) <= self.get_if_starting_scope_depth()) or len(self.scopes) <= 1:
-            raise PreprocessException('Attempted to leave final scope.', self.l.in_line, self.l.line_num)
+        if ((not ends_branch
+            and self.in_if()
+            and len(self.scopes) <= self.get_if_starting_scope_depth())
+        or len(self.scopes) <= 1):
+            raise PreprocessException('Attempted to leave final scope.', self.l)
         self.scopes.pop()
 
     def define(self, name, value=None, choices=None):
@@ -190,11 +203,17 @@ class ParsingEnvironment:
     def get_if_starting_scope_depth(self):
         return self.if_stack[-1].scope_depth
 
-    def __init__(self, local_vars):
+    def __init__(self):
         self.scopes = []
         self.if_stack = []
         self.push_scope()
-        self.l = local_vars
+        self.l = None
+
+    @classmethod
+    def from_base_env(cls, env):
+        result = cls()
+        result.scopes = env.scopes
+        return result
     #TODO: casing IS important for these identifiers; update the docs to reflect this
 
 # precompiled regexes
@@ -205,7 +224,7 @@ string_re["'"] = re.compile(r"(?<!\\)'")
 string_re['"'] = re.compile(r'(?<!\\)"')
 end_comment_re = re.compile(r'\*/')
 
-def preprocess(in_file, out_file):
+def do_preprocess(in_file, out_file, env):
 
     class ParseMode(Enum):
         Output = auto()
@@ -247,7 +266,7 @@ def preprocess(in_file, out_file):
         prev_line_num = 0
     l = LocalVariables
 
-    env = ParsingEnvironment(l)
+    env.l = l
 
     mode_stack = []
 
@@ -315,10 +334,7 @@ def preprocess(in_file, out_file):
     #----------------------------------------------------------------------------------------------
     # Error reporting
     def report_error(message):
-        if l.scan == 0:
-            raise PreprocessException(message, l.prev_line, l.prev_line_num)
-        else:
-            raise PreprocessException(message, l.in_line, l.line_num)
+        raise PreprocessException(message, l)
 
     def report_choice_inclusion_error(name, value, choices):
         choices_format = ", ".join(map(lambda c: f'"{c}"', choices))
@@ -459,7 +475,7 @@ def preprocess(in_file, out_file):
 
         definition = env.lookup(name)
         env.set_if_state(IfState.ElseIf)
-        env.pop_scope()
+        env.pop_scope(True)
         env.push_scope()
         if not definition:
             env.set_if_branch(False)
@@ -489,7 +505,7 @@ def preprocess(in_file, out_file):
         pop_mode()
 
         env.set_if_state(IfState.Else)
-        env.pop_scope()
+        env.pop_scope(True)
         env.push_scope()
         env.set_if_branch(not env.get_seen_true())
 
@@ -507,7 +523,7 @@ def preprocess(in_file, out_file):
         pop_mode()
 
         env.pop_if()
-        env.pop_scope()
+        env.pop_scope(True)
 
     def parse_directive():
         result = False
@@ -532,6 +548,7 @@ def preprocess(in_file, out_file):
         elif directive == 'fi':
             parse_fi()
         else:
+            # TODO: throw an error
             end = l.in_line[l.scan:].find('*/')
             parse_any(end + 2)
 
@@ -540,7 +557,7 @@ def preprocess(in_file, out_file):
             push_mode(new_mode)
         return result
 
-    def parse_next():
+    def parse_file():
         while l.in_line:
             # TODO: template literals
             # TODO: precompile this
@@ -564,15 +581,30 @@ def preprocess(in_file, out_file):
             else:
                 parse_line()
 
-    read_line()
 
     try:
-        parse_next()
+        read_line()
+        parse_file()
         # TODO: check that the if stack is empty
     except PreprocessException as e:
         log.error(e)
         return False
     return True
+
+global_env = ParsingEnvironment()
+
+def preprocess(in_file, out_file):
+    return do_preprocess(in_file, out_file, ParsingEnvironment.from_base_env(global_env))
+
+def preprocess_config(config_path):
+    class NullOut():
+        def write(s):
+            pass
+
+    out_file = NullOut()
+
+    with open(config_path, 'r') as in_file:
+        return do_preprocess(in_file, out_file, global_env)
 
 if __name__ == '__main__':
     # Parse the arguments
@@ -588,10 +620,14 @@ if __name__ == '__main__':
         os.makedirs(args.out_dir)
         log.verbose(f'Output directory "{args.out_dir}" created.')
 
+    # Read configuration file if there is one
+    if args.configuration:
+        preprocess_config(args.configuration)
+
     for filename in args.files:
         in_path = os.path.join(args.in_dir, filename)
         out_path = os.path.join(args.out_dir, filename)
-        if should_preprocess(in_path, out_path, args.build):
+        if should_preprocess(in_path, out_path, args.configuration, args.build):
             atomic_streamed_file_process(in_path, out_path, preprocess)
         else:
             log.verbose(f'Skipping "{filename}"; it is already up-to-date.')
