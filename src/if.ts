@@ -74,3 +74,13 @@ let m = 'debug';
 /*$ else */
 let m = 'release';
 /*$ fi */
+
+let s1 = `I say: "${ /*$ define template */m }" /*$note something*/`;
+/*$ if template */
+let s2 = 'template';
+/*$ else */
+let s2 = 'no template';
+/*$ fi */
+
+let s3 = `I say: "${ /*$ if template */'template'/*$ else */ 'not template' /*$ fi */ }" /*$note something*/`;
+let s4 = `I say: "${ /*$ if template */`template`/*$ else */ `not template` /*$ fi */ }" /*$note something*/`;

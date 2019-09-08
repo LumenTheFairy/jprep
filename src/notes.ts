@@ -42,3 +42,17 @@ block
 /*$note comment
 is
 preserved */
+let s7 = `Template literal keeps /*$note*/`; /*$note gone*/
+let s8 = `Template literal with \` keeps /*$note*/`; /*$note gone*/
+let s9 = `I say: "${ z /*$note nothing*/}" /*$note something*/`; /*$note gone*/
+let s10 = `I say: "\${ /*$note this stays*/ }"`; /*$note gone*/
+let s11 = `I say: "$\{ /*$note this stays*/ }"`; /*$note gone*/
+let s12 = `I say: "${ a /*$note nothing*/}" /*$note something*/ and "${ b /*$note nothing*/}/*$note something*/"`; /*$note gone*/
+let s13 = `I say: "${
+  {test: 5/*$note nothing*/} /*$note nothing*/
+}" /*$note something*/`; /*$note gone*/
+let s15 = `I say: "${
+  {test: `nested ${
+    {test: {test: 5/*$note nothing*/}, /*$note nothing*/x: 6}
+  }`/*$note nothing*/} /*$note nothing*/
+}" /*$note something*/`; /*$note gone*/

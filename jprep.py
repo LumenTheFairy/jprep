@@ -228,6 +228,9 @@ string_re = {}
 string_re["'"] = re.compile(r"(?<!\\)'")
 string_re['"'] = re.compile(r'(?<!\\)"')
 end_comment_re = re.compile(r'\*/')
+template_literal_re = re.compile(r'(?<!\\)`|(?<!\\)\$\{')
+main_loop_re = re.compile(r'/\*\$|"|\'|//|/\*|\{|\}|`')
+
 
 def same_text(s1, s2):
     """True if both strigns are the same, ignoring case."""
@@ -280,6 +283,8 @@ def do_preprocess(in_file, out_file, env):
     env.l = l
 
     mode_stack = []
+    # holds the scope depth at each template level
+    template_literal_stack = []
 
     def push_mode(mode):
         mode_stack.append(l.parse_mode)
@@ -388,6 +393,12 @@ def do_preprocess(in_file, out_file, env):
 
     def parse_block_comment():
         parse_until(end_comment_re)
+
+    def parse_template_literal():
+        parse_any(1)
+        parse_until(template_literal_re)
+        if l.in_line[l.scan-1] != '`':
+            template_literal_stack.append(env.get_scope_depth())
 
     #----------------------------------------------------------------------------------------------
     # Parsing directives
@@ -573,15 +584,26 @@ def do_preprocess(in_file, out_file, env):
             push_mode(new_mode)
         return result
 
+    def handle_close_brace():
+        if template_literal_stack and (template_literal_stack[-1] == env.get_scope_depth()):
+            if env.in_if():
+                report_error('Reached the end of a template expression in the middle of an if directive branches.')
+            template_literal_stack.pop()
+            parse_template_literal()
+        else:
+            env.pop_scope()
+            parse_any(1)
+
+
     def parse_file():
         while l.in_line:
-            # TODO: template literals
-            # TODO: precompile this
-            m = re.search(r'/\*\$|"|\'|//|/\*|\{|\}', l.in_line[l.scan:])
+            m = main_loop_re.search(l.in_line[l.scan:])
             if m:
                 parse_any(m.start(0))
                 if m[0] in ["'", '"']:
                     parse_string(l.in_line[l.scan])
+                elif m[0] == '`':
+                    parse_template_literal()
                 elif m[0] == '//':
                     parse_line_comment()
                 elif m[0] == '/*':
@@ -590,8 +612,7 @@ def do_preprocess(in_file, out_file, env):
                     env.push_scope()
                     parse_any(1)
                 elif m[0] == '}':
-                    env.pop_scope()
-                    parse_any(1)
+                    handle_close_brace()
                 elif m[0] == '/*$':
                     parse_directive()
             else:
