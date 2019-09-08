@@ -100,6 +100,16 @@ A file should be preprocessed for any of the following reasons:
         return True
     return False
 
+class PreprocessException(Exception):
+    """An exception thrown by preprocess which indicates a parse error that should be reported"""
+    def __init__(self, message, line, line_num):
+        self.message = message
+        self.line = line
+        self.line_num = line_num
+    def __str__(self):
+        return f'{self.message}\nLine {self.line_num}: {self.line}'
+    __repr__ = __str__
+
 class DefinitionEntry:
     """Holds the value and possible choices for a defined name"""
     def __init__(self, value, choices):
@@ -113,10 +123,11 @@ class IfState(Enum):
 
 class IfEntry:
     """Holds info about the current if directives"""
-    def __init__(self):
+    def __init__(self, scope_depth):
         self.state = IfState.If
         self.seen_true = False
         self.in_true = False
+        self.scope_depth = scope_depth
 
 class ParsingEnvironment:
     """Holds all definitions in a stack of scopes, and keeps track of nested if directives"""
@@ -127,6 +138,8 @@ class ParsingEnvironment:
 
     def pop_scope(self):
         """Leave the current scope"""
+        if (self.in_if() and len(self.scopes) <= self.get_if_starting_scope_depth()) or len(self.scopes) <= 1:
+            raise PreprocessException('Attempted to leave final scope.', self.l.in_line, self.l.line_num)
         self.scopes.pop()
 
     def define(self, name, value=None, choices=None):
@@ -140,9 +153,12 @@ class ParsingEnvironment:
                 return scope[name]
         return None
 
+    def get_scope_depth(self):
+        return len(self.scopes)
+
     def push_if(self):
         """Enter a new if directive"""
-        self.if_stack.append(IfEntry())
+        self.if_stack.append(IfEntry(len(self.scopes)))
 
     def pop_if(self):
         """Leave the current if directive"""
@@ -171,22 +187,15 @@ class ParsingEnvironment:
                 return False
         return True
 
-    def __init__(self):
+    def get_if_starting_scope_depth(self):
+        return self.if_stack[-1].scope_depth
+
+    def __init__(self, local_vars):
         self.scopes = []
         self.if_stack = []
         self.push_scope()
+        self.l = local_vars
     #TODO: casing IS important for these identifiers; update the docs to reflect this
-
-class PreprocessException(Exception):
-    """An exception thrown by preprocess which indicates a parse error that should be reported"""
-    def __init__(self, message, line, line_num):
-        self.message = message
-        self.line = line
-        self.line_num = line_num
-    def __str__(self):
-        return f'{self.message}\nLine {self.line_num}: {self.line}'
-    __repr__ = __str__
-
 
 # precompiled regexes
 whitespace_re = re.compile(r'(?!\s)')
@@ -197,8 +206,6 @@ string_re['"'] = re.compile(r'(?<!\\)"')
 end_comment_re = re.compile(r'\*/')
 
 def preprocess(in_file, out_file):
-
-    env = ParsingEnvironment()
 
     class ParseMode(Enum):
         Output = auto()
@@ -239,6 +246,8 @@ def preprocess(in_file, out_file):
         prev_line = ''
         prev_line_num = 0
     l = LocalVariables
+
+    env = ParsingEnvironment(l)
 
     mode_stack = []
 
@@ -423,6 +432,7 @@ def preprocess(in_file, out_file):
         [name, value] = parse_condition('if')
 
         definition = env.lookup(name)
+        env.push_scope()
         env.push_if()
         if not definition:
             env.set_if_branch(False)
@@ -439,6 +449,8 @@ def preprocess(in_file, out_file):
     def parse_elseif():
         if not env.in_if():
             report_error('"elseif" directive outside of "if".')
+        if env.get_scope_depth() != env.get_if_starting_scope_depth():
+            report_error('if branches must have the same scopes at the start and end.')
         if env.get_if_state() == IfState.Else:
             report_error('"elseif" directive after "else".')
 
@@ -447,6 +459,8 @@ def preprocess(in_file, out_file):
 
         definition = env.lookup(name)
         env.set_if_state(IfState.ElseIf)
+        env.pop_scope()
+        env.push_scope()
         if not definition:
             env.set_if_branch(False)
         else:
@@ -464,6 +478,8 @@ def preprocess(in_file, out_file):
     def parse_else():
         if not env.in_if():
             report_error('"else" directive outside of "if".')
+        if env.get_scope_depth() != env.get_if_starting_scope_depth():
+            report_error('if branches must have the same scopes at the start and end.')
         if env.get_if_state() == IfState.Else:
             report_error('"else" directive after "else".')
 
@@ -473,17 +489,25 @@ def preprocess(in_file, out_file):
         pop_mode()
 
         env.set_if_state(IfState.Else)
+        env.pop_scope()
+        env.push_scope()
         env.set_if_branch(not env.get_seen_true())
 
         return get_branch_parse_mode()
 
     def parse_fi():
+        if not env.in_if():
+            report_error('"fi" directive outside of "if".')
+        if env.get_scope_depth() != env.get_if_starting_scope_depth():
+            report_error('if branches must have the same scopes at the start and end.')
+
         parse_whitespace()
         if not try_parse_chars('*/'):
             report_error('Only whitespace allowed at the end of a "fi" directive.')
         pop_mode()
 
         env.pop_if()
+        env.pop_scope()
 
     def parse_directive():
         result = False
@@ -541,7 +565,13 @@ def preprocess(in_file, out_file):
                 parse_line()
 
     read_line()
-    parse_next()
+
+    try:
+        parse_next()
+        # TODO: check that the if stack is empty
+    except PreprocessException as e:
+        log.error(e)
+        return False
     return True
 
 if __name__ == '__main__':
@@ -562,9 +592,6 @@ if __name__ == '__main__':
         in_path = os.path.join(args.in_dir, filename)
         out_path = os.path.join(args.out_dir, filename)
         if should_preprocess(in_path, out_path, args.build):
-            try:
-                atomic_streamed_file_process(in_path, out_path, preprocess)
-            except PreprocessException as e:
-                log.error(e)
+            atomic_streamed_file_process(in_path, out_path, preprocess)
         else:
             log.verbose(f'Skipping "{filename}"; it is already up-to-date.')
