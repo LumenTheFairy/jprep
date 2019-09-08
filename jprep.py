@@ -159,6 +159,12 @@ class ParsingEnvironment:
         """Adds or overwrites the definition of name in the current scope"""
         self.scopes[-1][name] = DefinitionEntry(value, choices)
 
+    def undefine(self, name):
+        """Removes a definition of name from the current scope"""
+        if name not in self.scopes[-1]:
+            raise PreprocessException(f'Cannot undefine "{name}"; it does not exist in the current scope.', self.l)
+        del self.scopes[-1][name]
+
     def lookup(self, name):
         """Gets the entry for the most deeply nested definition of name, if there are any"""
         for scope in reversed(self.scopes):
@@ -426,6 +432,13 @@ def do_preprocess(in_file, out_file, env):
                 report_choice_inclusion_error(name, value, choices)
         env.define(name, value, choices)
 
+    def parse_undefine():
+        name = parse_identifier('Expected a name at the begining of the "undefine" directive.')
+        parse_whitespace()
+        if not try_parse_chars('*/'):
+            report_error(f'Only whitespace allowed at the end of a "{directive}" directive.')
+        env.undefine(name)
+
     def parse_condition(directive):
         name = parse_identifier(f'Expected a name at the begining of the "{directive}" directive.')
         parse_whitespace()
@@ -539,7 +552,8 @@ def do_preprocess(in_file, out_file, env):
             parse_note()
         elif directive == 'define':
             parse_define()
-        #TODO: parse undefine
+        elif directive == 'undefine':
+            parse_undefine()
         elif directive == 'if':
             new_mode = parse_if()
         elif directive == 'elseif':
