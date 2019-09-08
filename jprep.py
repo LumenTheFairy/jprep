@@ -58,9 +58,9 @@ def parseArguments():
         help=f'configuration file which holds definitions that stay in scope for all preprocessed files'
         )
     parser.add_argument(
-        "-b", "--build",
+        "-b", "--build_off",
         action="store_true",
-        help="preprocess all files, even if the output modification is more recent than the source"
+        help="only preprocess files that can be determined to need preprocessing"
         )
     parser.add_argument("--verbose", action="store_true", help="display additional information")
 
@@ -539,6 +539,7 @@ def do_preprocess(in_file, out_file, env):
             parse_note()
         elif directive == 'define':
             parse_define()
+        #TODO: parse undefine
         elif directive == 'if':
             new_mode = parse_if()
         elif directive == 'elseif':
@@ -593,12 +594,20 @@ def do_preprocess(in_file, out_file, env):
 
 global_env = ParsingEnvironment()
 
+def show_global_env():
+    return '\n'.join(
+        ['Configuration:'] + [
+        f'  {name} = {entry.value}'
+        for (name, entry)
+         in global_env.scopes[0].items()
+        ])
+
 def preprocess(in_file, out_file):
     return do_preprocess(in_file, out_file, ParsingEnvironment.from_base_env(global_env))
 
 def preprocess_config(config_path):
     class NullOut():
-        def write(s):
+        def write(self, s):
             pass
 
     out_file = NullOut()
@@ -623,11 +632,13 @@ if __name__ == '__main__':
     # Read configuration file if there is one
     if args.configuration:
         preprocess_config(args.configuration)
+        log.verbose(show_global_env())
 
     for filename in args.files:
         in_path = os.path.join(args.in_dir, filename)
         out_path = os.path.join(args.out_dir, filename)
-        if should_preprocess(in_path, out_path, args.configuration, args.build):
+        if should_preprocess(in_path, out_path, args.configuration, not args.build_off):
             atomic_streamed_file_process(in_path, out_path, preprocess)
+            log.verbose(f'Preprocessed "{filename}".')
         else:
             log.verbose(f'Skipping "{filename}"; it is already up-to-date.')
