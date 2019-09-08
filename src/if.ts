@@ -54,6 +54,20 @@ let d = 3;
 let d = 4;
 /*$ fi */
 
+/*$ note case matters on names and values */
+/*$ define case = lower */
+/*$ if case = lower */
+let case1 = 'lower';
+/*$ else */
+let case1 = 'upper';
+/*$ fi */
+/*$ define case = LOWER */
+/*$ if case = lower */
+let case2 = 'lower';
+/*$ else */
+let case2 = 'upper';
+/*$ fi */
+
 /*$ note test config */
 /*$ if mode = debug */
 let m = 'debug';

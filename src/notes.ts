@@ -14,6 +14,9 @@ directive*/
 /*$
 note the directive can be on a different line
 */
+/*$ NOTE case doesn't matter on directive names */
+/*$ NoTe case doesn't matter on directive names */
+/*$ nOtE case doesn't matter on directive names */
 /*$note the following lines have nothing special and should quickly be written out*/
 let z = [
   0,

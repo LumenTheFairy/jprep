@@ -117,7 +117,7 @@ class PreprocessException(Exception):
         if self.l.scan == 0:
             return f'{self.message}\nLine {self.l.prev_line_num}: {self.l.prev_line}'
         else:
-            return f'{self.message}\nLine {self.l.line_num}: {self.l.line}'
+            return f'{self.message}\nLine {self.l.line_num}: {self.l.in_line}'
     __repr__ = __str__
 
 class DefinitionEntry:
@@ -220,7 +220,6 @@ class ParsingEnvironment:
         result = cls()
         result.scopes = env.scopes
         return result
-    #TODO: casing IS important for these identifiers; update the docs to reflect this
 
 # precompiled regexes
 whitespace_re = re.compile(r'(?!\s)')
@@ -229,6 +228,12 @@ string_re = {}
 string_re["'"] = re.compile(r"(?<!\\)'")
 string_re['"'] = re.compile(r'(?<!\\)"')
 end_comment_re = re.compile(r'\*/')
+
+def same_text(s1, s2):
+    """True if both strigns are the same, ignoring case."""
+    # note, unicodedata.normalize is a good idea to get this to work all the time,
+    # but this is only used here to compare against our simple directive names
+    return s1.casefold() == s2.casefold()
 
 def do_preprocess(in_file, out_file, env):
 
@@ -420,7 +425,6 @@ def do_preprocess(in_file, out_file, env):
         if old_definition:
             if old_definition.choices:
                 if choices:
-                    # TODO: say where they were set?
                     report_error(f'"{name}" already has a set of choices.')
                 else:
                     choices = old_definition.choices
@@ -547,25 +551,22 @@ def do_preprocess(in_file, out_file, env):
         directive = parse_identifier('Directives must start with an identifier.')
         parse_whitespace()
 
-        # TODO: casing should not be important
-        if directive == 'note':
+        if same_text(directive, 'note'):
             parse_note()
-        elif directive == 'define':
+        elif same_text(directive, 'define'):
             parse_define()
-        elif directive == 'undefine':
+        elif same_text(directive, 'undefine'):
             parse_undefine()
-        elif directive == 'if':
+        elif same_text(directive, 'if'):
             new_mode = parse_if()
-        elif directive == 'elseif':
+        elif same_text(directive, 'elseif'):
             new_mode = parse_elseif()
-        elif directive == 'else':
+        elif same_text(directive, 'else'):
             new_mode = parse_else()
-        elif directive == 'fi':
+        elif same_text(directive, 'fi'):
             parse_fi()
         else:
-            # TODO: throw an error
-            end = l.in_line[l.scan:].find('*/')
-            parse_any(end + 2)
+            report_error(f'"{directive}"" is not a recognized directive.')
 
         pop_mode()
         if new_mode:
@@ -600,7 +601,8 @@ def do_preprocess(in_file, out_file, env):
     try:
         read_line()
         parse_file()
-        # TODO: check that the if stack is empty
+        if env.in_if():
+            report_error('Reached the end of the file in the middle of an if directive branches.')
     except PreprocessException as e:
         log.error(e)
         return False
