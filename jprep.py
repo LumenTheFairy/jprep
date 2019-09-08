@@ -62,7 +62,7 @@ def parseArguments():
         action="store_true",
         help="only preprocess files that can be determined to need preprocessing"
         )
-    parser.add_argument("--verbose", action="store_true", help="display additional information")
+    parser.add_argument("--verbose", action="store_true", help="display additional information during preprocessing")
 
     # Print version
     parser.add_argument("-v", "--version", action="version", version='%(prog)s - Version 1.0')
