@@ -317,9 +317,9 @@ def do_preprocess(in_file, out_file, env):
         l.emit = l.scan
 
     def move_to_next_line_if_necessary():
-        if l.scan >= len(l.in_line):
+        if l.scan > len(l.in_line):
             raise Exception('Internal error')
-        if l.in_line[l.scan:] == '\n':
+        if l.in_line[l.scan:] == '\n' or l.in_line[l.scan:] == '':
             write_output()
             read_line()
 
