@@ -233,7 +233,7 @@ main_loop_re = re.compile(r'/\*\$|"|\'|//|/\*|\{|\}|`')
 
 
 def same_text(s1, s2):
-    """True if both strigns are the same, ignoring case."""
+    """True if both strings are the same, ignoring case."""
     # note, unicodedata.normalize is a good idea to get this to work all the time,
     # but this is only used here to compare against our simple directive names
     return s1.casefold() == s2.casefold()
@@ -406,7 +406,7 @@ def do_preprocess(in_file, out_file, env):
         parse_until(end_comment_re)
 
     def parse_define():
-        name = parse_identifier('Expected a name at the begining of the "define" directive.')
+        name = parse_identifier('Expected a name at the beginning of the "define" directive.')
         parse_whitespace()
         value = None
         choices = None
@@ -448,14 +448,14 @@ def do_preprocess(in_file, out_file, env):
         env.define(name, value, choices)
 
     def parse_undefine():
-        name = parse_identifier('Expected a name at the begining of the "undefine" directive.')
+        name = parse_identifier('Expected a name at the beginning of the "undefine" directive.')
         parse_whitespace()
         if not try_parse_chars('*/'):
             report_error(f'Only whitespace allowed at the end of a "{directive}" directive.')
         env.undefine(name)
 
     def parse_condition(directive):
-        name = parse_identifier(f'Expected a name at the begining of the "{directive}" directive.')
+        name = parse_identifier(f'Expected a name at the beginning of the "{directive}" directive.')
         parse_whitespace()
         value = None
         if try_parse_chars('='):
