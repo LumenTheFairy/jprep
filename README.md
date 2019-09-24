@@ -2,7 +2,7 @@
 
 `jprep` is a JavaScript/TypeScript preprocessor. It's usage is as follows:
 ```
-usage: jprep.py [-h] [-i IN_DIR] [-o OUT_DIR] [-c CONFIGURATION] [-b]
+usage: jprep.py [-h] [-i IN_DIR] [-o OUT_DIR] [-c CONFIGURATION] [-b] [-s]
                 [--verbose] [-v]
                 files [files ...]
 
@@ -24,6 +24,10 @@ optional arguments:
                         in scope for all preprocessed files
   -b, --build_off       only preprocess files that can be determined to need
                         preprocessing
+  -s, --strict_define   makes it an error for a define to have no value or a
+                        condition not to check against a value, or when a
+                        condition uses a value that has not been defined in
+                        the current scope
   --verbose             display additional information during preprocessing
   -v, --version         show program's version number and exit
 ```

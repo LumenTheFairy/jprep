@@ -62,6 +62,11 @@ def parseArguments():
         action="store_true",
         help="only preprocess files that can be determined to need preprocessing"
         )
+    parser.add_argument(
+        "-s", "--strict_define",
+        action="store_true",
+        help="makes it an error for a define to have no value or a condition not to check against a value, or when a condition uses a value that has not been defined in the current scope"
+        )
     parser.add_argument("--verbose", action="store_true", help="display additional information during preprocessing")
 
     # Print version
@@ -431,6 +436,8 @@ def do_preprocess(in_file, out_file, env):
         if not try_parse_chars('*/'):
             report_error('Only whitespace allowed at the end of a "define" directive.')
 
+        if args.strict_define and not value:
+            report_error('definitions must set a value when using --strict_define')
 
         old_definition = env.lookup(name)
         if old_definition:
@@ -479,8 +486,12 @@ def do_preprocess(in_file, out_file, env):
         env.push_scope()
         env.push_if()
         if not definition:
+            if args.strict_define:
+                report_error('condition value must be defined when using --strict_define')
             env.set_if_branch(False)
         else:
+            if args.strict_define and not value:
+                report_error('condtion must test against a value when using --strict_define')
             if definition.choices and not value in definition.choices: # False even if value is None
                 report_choice_inclusion_error(name, value, definition.choices)
             if definition.value == value:
