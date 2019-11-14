@@ -180,6 +180,9 @@ class ParsingEnvironment:
     def get_scope_depth(self):
         return len(self.scopes)
 
+    def get_if_depth(self):
+        return len(self.if_stack)
+
     def push_if(self):
         """Enter a new if directive"""
         self.if_stack.append(IfEntry(len(self.scopes)))
@@ -403,7 +406,7 @@ def do_preprocess(in_file, out_file, env):
         parse_any(1)
         parse_until(template_literal_re)
         if l.in_line[l.scan-1] != '`':
-            template_literal_stack.append(env.get_scope_depth())
+            template_literal_stack.append([env.get_scope_depth(), env.get_if_depth])
 
     #----------------------------------------------------------------------------------------------
     # Parsing directives
@@ -596,9 +599,9 @@ def do_preprocess(in_file, out_file, env):
         return result
 
     def handle_close_brace():
-        if template_literal_stack and (template_literal_stack[-1] == env.get_scope_depth()):
-            if env.in_if():
-                report_error('Reached the end of a template expression in the middle of an if directive branches.')
+        if template_literal_stack and (template_literal_stack[-1][0] == env.get_scope_depth()):
+            if env.in_if() and (env.get_if_depth != template_literal_stack[-1][1]):
+                report_error('Reached the end of a template expression in the middle of an if directive branch.')
             template_literal_stack.pop()
             parse_template_literal()
         else:

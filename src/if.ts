@@ -84,3 +84,4 @@ let s2 = 'no template';
 
 let s3 = `I say: "${ /*$ if template */'template'/*$ else */ 'not template' /*$ fi */ }" /*$note something*/`;
 let s4 = `I say: "${ /*$ if template */`template`/*$ else */ `not template` /*$ fi */ }" /*$note something*/`;
+/*$ if template */let s5 = `template ${m}`;/*$ fi */
