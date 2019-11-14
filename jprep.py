@@ -75,6 +75,8 @@ def parseArguments():
     # Parse arguments
     return parser.parse_args()
 
+EXIT_CODE = 0
+
 def atomic_streamed_file_process(in_path, out_path, process_func):
     """Effectively reads from the file at in_path, processes it with
 process_func, and writes the result to out_path. However, if process_func
@@ -247,6 +249,8 @@ def same_text(s1, s2):
     return s1.casefold() == s2.casefold()
 
 def do_preprocess(in_file, out_file, env):
+
+    global EXIT_CODE
 
     class ParseMode(Enum):
         Output = auto()
@@ -640,6 +644,7 @@ def do_preprocess(in_file, out_file, env):
             report_error('Reached the end of the file in the middle of an if directive branches.')
     except PreprocessException as e:
         log.error(e)
+        EXIT_CODE = -1
         return False
     return True
 
@@ -693,3 +698,5 @@ if __name__ == '__main__':
             log.verbose(f'Preprocessed "{filename}".')
         else:
             log.verbose(f'Skipping "{filename}"; it is already up-to-date.')
+
+    exit(EXIT_CODE)
