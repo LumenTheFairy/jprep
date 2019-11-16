@@ -2,8 +2,8 @@
 
 `jprep` is a JavaScript/TypeScript preprocessor. It's usage is as follows:
 ```
-usage: jprep.py [-h] [-i IN_DIR] [-o OUT_DIR] [-c CONFIGURATION] [-b] [-s]
-                [--verbose] [-v]
+usage: jprep.py [-h] [-i IN_DIR] [-o OUT_DIR] [-r] [-c CONFIGURATION] [-b]
+                [-s] [--verbose] [-v]
                 files [files ...]
 
 Preprocesses the given JavaScript/TypeScript files.
@@ -19,6 +19,8 @@ optional arguments:
   -o OUT_DIR, --out_dir OUT_DIR
                         directory in which to write the output files (defaults
                         to "./preprocessed/")
+  -r, --readonly        preprocessed files will be saved in readonly mode, to
+                        help prevent accidental edits
   -c CONFIGURATION, --configuration CONFIGURATION
                         configuration file which holds definitions that stay
                         in scope for all preprocessed files

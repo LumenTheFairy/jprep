@@ -16,6 +16,7 @@ ID_CH = r'[\w$]'
 import argparse
 from sys import stderr
 import os
+from stat import S_IREAD, S_IRGRP, S_IROTH, S_IWUSR
 import re
 from enum import Enum, auto
 
@@ -51,6 +52,11 @@ def parseArguments():
         "-o", "--out_dir",
         default=DEFAULT_OUT_DIR,
         help=f'directory in which to write the output files (defaults to "{DEFAULT_OUT_DIR}")'
+        )
+    parser.add_argument(
+        "-r", "--readonly",
+        action="store_true",
+        help='preprocessed files will be saved in readonly mode, to help prevent accidental edits'
         )
     parser.add_argument(
         "-c", "--configuration",
@@ -91,7 +97,13 @@ and is expected to return the a boolean indicating its success."""
     with open(in_path, 'r') as in_file, open(out_path + '.temp', 'w') as out_file:
         success = process_func(in_file, out_file)
     if success:
-        os.replace(out_path + '.temp', out_path)
+        if os.path.exists(out_path):
+            os.chmod(out_path, S_IWUSR|S_IREAD)
+        try:
+            os.replace(out_path + '.temp', out_path)
+        finally:
+            if args.readonly:
+                os.chmod(out_path, S_IREAD|S_IRGRP|S_IROTH)
     else:
         os.remove(out_path + '.temp')
 
